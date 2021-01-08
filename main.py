@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import bs4
 import requests
 
 from bs4 import BeautifulSoup
@@ -23,9 +24,12 @@ class YueDu88:
         :return: BeautifulSoup对象
         """
         response = requests.get(url=url, headers=self.headers)
-        response.encoding = "utf-8"
-        soup = BeautifulSoup(response.text, "lxml")
-        return soup
+        if response.status_code == 200:
+            response.encoding = "utf-8"
+            soup = BeautifulSoup(response.text, "lxml")
+            return soup
+        else:
+            print(f"url:{url}下载失败:{response.reason}")
 
     def get_parsed_text(self, chapter_url):
         """
@@ -35,20 +39,21 @@ class YueDu88:
         """
         soup = self.get_soup(chapter_url)
 
-        # 章节名
-        title = soup.find("h1").text.strip()
+        if soup:
+            # 章节名
+            title = soup.find("h1").text.strip()
 
-        # 内容
-        text_list = soup.find_all("p")
-        text = "    " + "\n    ".join(l.text.strip() for l in text_list)
+            # 内容
+            text_list = soup.find("div", attrs={"id": "BookText"})
+            text = get_all_text(text_list)[1]
 
-        chapter_id = chapter_url.split("/")[-1].split(".")[0]  # 提取出数字63601
-        chapter = title + "\n\n" + text
+            chapter_id = chapter_url.split("/")[-1].split(".")[0]  # 提取出数字63601
+            chapter = title + "\n\n" + text
 
-        # 用多线程下载，先存到一个字典
-        self.download.update({int(chapter_id): chapter})
-        print(f"章节:{title}下载成功，id:{chapter_id}")
-        return chapter
+            # 用多线程下载，先存到一个字典
+            self.download.update({int(chapter_id): chapter})
+            print(f"章节:{title}下载成功，id:{chapter_id}")
+            return chapter
 
     def get_chapters(self, book_url):
         """
@@ -109,7 +114,7 @@ class YueDu88:
         tasks = []
         self.get_chapters(book_url)
         for i in range(self.first_chapter_id, self.last_chapter_id + 1):
-            url = book_url + str(i) + ".html"
+            url = f"{book_url}/{str(i)}.html"
             tasks.append(Thread(target=self.get_parsed_text, args=(url,)))
         # 执行多线程下载
         [t.start() for t in tasks]
@@ -123,13 +128,37 @@ class YueDu88:
             for i in range(self.first_chapter_id, self.last_chapter_id + 1):
                 # 判断是否有下载失败的章节
                 if self.download.get(i):
-                    f.write(self.download.get(i) + "\n\n\n")
+                    f.write(self.download.get(i) + "\n\n\n\n\n")
                 else:
                     print(f"章节{i}丢失, 所有章节{self.download.keys()}")
-        print(f"文件保存成功，文件名{file_name}")
+        print(f"文件保存成功，文件名:{file_name}")
+
+
+def get_all_text(soup):
+    """
+    传入tag，循环取出所有的文本
+    flag: 网页最下面有个“在线阅读网” 说明已经到底，停止执行循环
+    :param soup: 传入tag节点
+    :return:
+    """
+    flag = False
+    text = ""
+    for s in soup:
+        if isinstance(s, bs4.element.Tag):
+            t = get_all_text(s)
+            if t[0]:
+                break
+            text += t[1]
+        elif isinstance(s, bs4.element.NavigableString):
+            if s.replace(" ", "").startswith("在线"):
+                flag = True
+                break
+            elif s.strip():
+                text += f"\n    {s.strip()}"
+    return flag, text
 
 
 if __name__ == "__main__":
     yd = YueDu88()
-    yd.download_book("http://www.yuedu88.com/sszyqdjjxgs/")
+    yd.download_book("http://www.yuedu88.com/ndxnfwnds")  # 最后面不要有斜杠/
     yd.save_to_file()
